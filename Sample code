@@ -1,1 +1,25 @@
+int moistureSensor = A5;
+int start1 = 14;
+int end1 = 37;
+void setup() {
+  for (int i = start1; i <= end1; i++) {
+    pinMode(i, OUTPUT);
+  }
 
+}
+void loop() {
+  int sensorValue = analogRead(moistureSensor);
+  if (sensorValue >= 965)
+  {
+    for (int i = start1; i <= end1; i++) {
+      digitalWrite(i, LOW);
+    }
+  }
+
+  else if (sensorValue <= 1010)
+  {
+    for (int i = start1; i <= end1; i++) {
+      digitalWrite(i, HIGH);
+    }
+  }
+}

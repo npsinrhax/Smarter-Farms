@@ -1,25 +1,80 @@
-int moistureSensor = A5;
-int start1 = 14;
-int end1 = 37;
-void setup() {
-  for (int i = start1; i <= end1; i++) {
-    pinMode(i, OUTPUT);
-  }
+#include <EEPROM.h>
+#include <LDateTime.h>
 
+datetimeInfo t;
+unsigned int rtc;
+
+int LDR = A4;
+int moistureSensor = A5;
+int motorpin = 10;
+
+int cropthreshold[] = {1000, 900, 950, 800, 850};
+int cropwatering[] = {2, 7, 12, 14, 5};
+
+void setup() {
+  pinMode(moistureSensor, INPUT);
+  pinMode(LDR, INPUT);
+  LDateTime.getTime(&t);
+  LDateTime.getRtc(&rtc);
 }
 void loop() {
   int sensorValue = analogRead(moistureSensor);
-  if (sensorValue >= 965)
-  {
-    for (int i = start1; i <= end1; i++) {
-      digitalWrite(i, LOW);
+  int flag = 0;
+  //EEPROM addr 0 - plant type
+  //            1 - no. of times watered
+  //            2 - day of the week
+  //            3 - day no. of that week
+
+  //Configuring the system and the crop
+  if (Serial.available()) {
+    Serial.println("Do you want to change the crop y/n: ");
+    char c = Serial.read();
+    if (c == 'y') {
+      EEPROM.write(0, 0);
+      EEPROM.write(1, 0);
+      EEPROM.write(2, t.day);
+      EEPROM.write(3, 0);
+      Serial.println("Enter the plant to grown: ");
+      int choice = Serial.read();
+      EEPROM.write(0, choice);
     }
   }
 
-  else if (sensorValue <= 1010)
-  {
-    for (int i = start1; i <= end1; i++) {
-      digitalWrite(i, HIGH);
+  //LDR Read
+  int light = analogread(LDR);
+  if (LDR < 500)
+    flag = 0;
+  else
+    flag = 1;
+
+  //Checking day of the week and incrementing
+  byte day = EEPROM.read(2);
+  if (day != t.day) {
+    day++;
+    EEPROM.write(2, day);
+    byte no_of_days = EEPROM.read(3);
+    no_of_days ++;
+    if (no_of_days == 7) {
+      no_of_days = 0;
+      EEPROM.write(1, 0);
     }
+    EEPROM.write(3, no_of_days);
   }
+  //Reading how many times the crop has been watered that week
+  int no_of_times = EEPROM.read(1);
+  
+  //Running the actual code
+  if (flag == 1 && no_of_times < cropwatering[choice]) {
+    if (sensorValue >= cropthreshold[choice])
+    {
+      digitalWrite(motorpin, HIGH);
+      int val = EEPROM.read(1);
+      val++;
+      EEPROM.write(1, val);
+      digitalWrite(motorpin, HIGH);
+    }
+    else
+      digitalWrite(motorpin, LOW);
+  }
+  delay(5000);
 }

@@ -1,8 +1,11 @@
 #include <EEPROM.h>
 #include <LDateTime.h>
+#include <LGSM.h>
 
 datetimeInfo t;
 unsigned int rtc;
+
+String message = "Crops have been watered now!";
 
 int LDR = A4;
 int moistureSensor = A5;
@@ -16,6 +19,11 @@ void setup() {
   pinMode(LDR, INPUT);
   LDateTime.getTime(&t);
   LDateTime.getRtc(&rtc);
+  while (!LSMS.ready())                 // Wait for the sim to initialize
+  {
+    delay(1000);                        // Wait for a second and then try again
+  }
+  LSMS.beginSMS("0123456789");
 }
 void loop() {
   int sensorValue = analogRead(moistureSensor);
@@ -62,11 +70,12 @@ void loop() {
   }
   //Reading how many times the crop has been watered that week
   int no_of_times = EEPROM.read(1);
-  
+
   //Running the actual code
   if (flag == 1 && no_of_times < cropwatering[choice]) {
     if (sensorValue >= cropthreshold[choice])
     {
+      LSMS.print(message);
       digitalWrite(motorpin, HIGH);
       int val = EEPROM.read(1);
       val++;

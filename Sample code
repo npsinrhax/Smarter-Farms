@@ -1,38 +1,36 @@
-#include <EEPROM.h>
+#include <LEEPROM.h>
 #include <LDateTime.h>
 #include <LGSM.h>
 
-datetimeInfo t;
 unsigned int rtc;
 
 String message = "Crops have been watered now!";
 
-int LDR = A4;
-int moistureSensor = A5;
+int LDR = A1;
+int moistureSensor = A2;
 int motorpin = 10;
 
-int cropthreshold[] = {1000, 900, 950, 800, 850};
+int choice = 0;
+int cropthreshold[] = {70, 90, 95, 50, 85};
 int cropwatering[] = {2, 7, 12, 14, 5};
 
 void setup() {
   pinMode(moistureSensor, INPUT);
+  pinMode(motorpin, OUTPUT);
   pinMode(LDR, INPUT);
-  LDateTime.getTime(&t);
-  LDateTime.getRtc(&rtc);
   while (!LSMS.ready())                 // Wait for the sim to initialize
   {
     delay(1000);                        // Wait for a second and then try again
   }
-  LSMS.beginSMS("0123456789");
+  LSMS.beginSMS("9611701140");
 }
 void loop() {
-  int sensorValue = analogRead(moistureSensor);
   int flag = 0;
   //EEPROM addr 0 - plant type
   //            1 - no. of times watered
   //            2 - day of the week
   //            3 - day no. of that week
-
+  //            4 - flag for sms
   //Configuring the system and the crop
   if (Serial.available()) {
     Serial.println("Do you want to change the crop y/n: ");
@@ -40,50 +38,59 @@ void loop() {
     if (c == 'y') {
       EEPROM.write(0, 0);
       EEPROM.write(1, 0);
-      EEPROM.write(2, t.day);
+      EEPROM.write(2, 0);
       EEPROM.write(3, 0);
       Serial.println("Enter the plant to grown: ");
-      int choice = Serial.read();
+      choice = Serial.read();
       EEPROM.write(0, choice);
     }
   }
 
   //LDR Read
-  int light = analogread(LDR);
-  if (LDR < 500)
+  int light = analogRead(LDR);
+  light = 0;
+  if (light < 500)
     flag = 0;
   else
     flag = 1;
 
-  //Checking day of the week and incrementing
-  byte day = EEPROM.read(2);
-  if (day != t.day) {
-    day++;
-    EEPROM.write(2, day);
-    byte no_of_days = EEPROM.read(3);
-    no_of_days ++;
-    if (no_of_days == 7) {
-      no_of_days = 0;
-      EEPROM.write(1, 0);
-    }
-    EEPROM.write(3, no_of_days);
-  }
   //Reading how many times the crop has been watered that week
   int no_of_times = EEPROM.read(1);
 
+  //Incrementing day of the week
+  LDateTime.getRtc(&rtc);
+  rtc -= 14700;
+  rtc = rtc % 86400;
+  rtc /= 400;
+  if (rtc < EEPROM.read(2)) {
+    int a = EEPROM.read(3);
+    a ++;
+    if (a == 8)
+      a = 0;
+    EEPROM.write(3, a);
+  }
+  EEPROM.write(2, rtc);
   //Running the actual code
   if (flag == 1 && no_of_times < cropwatering[choice]) {
-    if (sensorValue >= cropthreshold[choice])
+    int sensorValue = analogRead(moistureSensor);
+    float moisture_percentage = ( (sensorValue / 1023.00) * 100 ) ;
+    if (moisture_percentage >= cropthreshold[choice])
     {
-      LSMS.print(message);
+      if (EEPROM.read(4) == 0) {
+        LSMS.print(message);
+        LSMS.endSMS();
+      }
+      EEPROM.write(4, 1);
       digitalWrite(motorpin, HIGH);
       int val = EEPROM.read(1);
       val++;
       EEPROM.write(1, val);
-      digitalWrite(motorpin, HIGH);
+      delay(10000);
     }
-    else
+    else {
       digitalWrite(motorpin, LOW);
+      EEPROM.write(4, 0);
+    }
   }
   delay(5000);
 }

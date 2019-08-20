@@ -1,0 +1,227 @@
+#include <LGPRS.h>
+#include <LGPRSClient.h>
+#include <LGPRSServer.h>
+
+#include <LGPS.h>
+#include <HttpClient.h>
+#include <LTask.h>
+#include <LWiFi.h>
+#include <LWiFiClient.h>
+#include <LDateTime.h>
+
+#include <LEEPROM.h>
+#include <LGSM.h>
+
+#define WIFI_AP "ssss"
+#define WIFI_PASSWORD "qwerty123"
+#define WIFI_AUTH LWIFI_WPA  // choose from LWIFI_OPEN, LWIFI_WPA, or LWIFI_WEP.
+#define per 50
+#define per1 3
+#define DEVICEID "DOCPgWwK"
+#define DEVICEKEY "iOd9fJjEBzcZzH60"
+#define SITE_URL "api.mediatek.com"
+
+#include "LDHT.h"
+
+#define DHTPIN 8          // what pin we're connected to
+#define DHTTYPE DHT11     // using DHT11 sensor
+
+LDHT dht(DHTPIN, DHTTYPE);
+
+float tempC = 0.0, Humi = 0.0;
+
+gpsSentenceInfoStruct info;
+char buff[256];
+double latitude;
+double longitude;
+
+unsigned int rtc;
+
+String ch;
+
+String message = "Crops have been watered now! The current temperature is: 25.0*C and the humidity is: 86.4%. ";
+
+int f = 0;
+int LDR = A1;
+int moistureSensor = A2;
+int motorpin = 12;
+
+int choice = 1;
+int cropthreshold[5] = {20, 20, 20, 20, 20};
+int cropwatering[5] = {10, 10, 10, 10, 10};
+
+char buffer_latitude[8];
+char buffer_longitude[8];
+LGPRSClient c;
+//LWiFiClient c;
+unsigned int lrtc;
+unsigned int rtc1;
+unsigned int lrtc1;
+char port[4] = {0};
+char connection_info[21] = {0};
+char ip[15] = {0};
+int portnum;
+int val = 0;
+String tcpdata = String(DEVICEID) + "," + String(DEVICEKEY) + ",0";
+String tcpcmd_led_on = "LED_CONTROL,1";
+String tcpcmd_led_off = "LED_CONTROL,0";
+String upload_led;
+
+LGPRSClient c2;
+//LWiFiClient c2;
+HttpClient http(c2);
+
+void setup()
+{
+  pinMode(12, OUTPUT);
+  dht.begin();
+  LTask.begin();
+  LWiFi.begin();
+  //Serial.begin(115200);
+  LGPS.powerOn();
+
+  AP_connect();
+  getconnectInfo();
+  connectTCP();
+
+  pinMode(moistureSensor, INPUT);
+  pinMode(motorpin, OUTPUT);
+  pinMode(LDR, INPUT);
+  while (!LSMS.ready())                 // Wait for the sim to initialize
+  {
+    delay(1000);                        // Wait for a second and then try again
+  }
+  LSMS.beginSMS("9611701140");
+  LSMS.print(message);
+  pinMode(2, OUTPUT);
+  pinMode(A0, INPUT);
+  //Serial.println("==============================");
+}
+
+void loop()
+{
+  int flag = 0;
+  analogWrite(2, 200);
+  Serial.println(analogRead(A0));
+  if (analogRead(A0) > 100)
+    f = 1;
+  else
+    f = 0;
+  //EEPROM addr 0 - plant type
+  //            1 - no. of times watered
+  //            2 - day of the week
+  //            3 - day no. of that week
+  //            4 - flag for sms
+  //Configuring the system and the crop
+  if (f == 1) {
+    f = 0;
+    while (Serial.available() == 0) {}    // Wait until user inputs data and start the program when data is receive
+    String startBuffer = Serial.readString();    // Save the users input in startBuffer variable
+    Serial.println("Do you want to change the crop y/n: ");
+    while (Serial.available() == 0) {}    // Wait until user inputs data and start the program when data is received
+    ch = Serial.readString();
+    if (ch == "y") {
+      for (int i = 0; i < 4; i ++) {
+        EEPROM.write(i, 0);
+      }
+      Serial.println("Enter the plant to grown: ");
+      while (Serial.available() == 0) {}    // Wait until user inputs data and start the program when data is received
+      choice = Serial.read();
+      choice -= 1;
+      EEPROM.write(0, choice);
+      Serial.println("Your choice has been recorded");
+    }
+  }
+
+  //LDR Read
+  int light = analogRead(LDR);
+  light = 1000;
+  if (light < 500)
+    flag = 0;
+  else
+    flag = 1;
+
+  //Reading how many times the crop has been watered that week
+  int no_of_times = EEPROM.read(1);
+
+  //Incrementing day of the week
+  LDateTime.getRtc(&rtc);
+  rtc -= 14700;
+  rtc = rtc % 86400;
+  rtc /= 400;
+  if (rtc < EEPROM.read(2)) {
+    int a = EEPROM.read(3);
+    a ++;
+    if (a == 8) {
+      a = 0;
+      EEPROM.write(1, 0);
+    }
+    EEPROM.write(3, a);
+  }
+  EEPROM.write(2, rtc);
+  //Running the actual code
+  choice = EEPROM.read(0) - 47;
+
+  if (no_of_times == 10)
+    EEPROM.write(1, 0);
+
+  int flagf = 1;
+  if ((flag == 1) && (no_of_times < cropwatering[choice])) {
+    int sensorValue = analogRead(moistureSensor);
+    float moisture_percentage = ( (sensorValue / 1023.00) * 100 ) ;
+    if (moisture_percentage < cropthreshold[choice])
+    {
+      if (EEPROM.read(4) == 0) {
+        LSMS.endSMS();
+      }
+      EEPROM.write(4, 1);
+      digitalWrite(motorpin, LOW);
+      int val = EEPROM.read(1);
+      val++;
+      EEPROM.write(1, val);
+      flagf = 0;
+      delay(1000);
+    }
+    else {
+      digitalWrite(motorpin, HIGH);
+      EEPROM.write(4, 0);
+      flagf = 1;
+    }
+  }
+
+  String tcpcmd = "";
+  while (c.available() && flagf == 1)
+  {
+    int v = c.read();
+    if (v != -1)
+    {
+      //Serial.print((char)v);
+      tcpcmd += (char)v;
+      if (tcpcmd.substring(40).equals(tcpcmd_led_on)) {
+        digitalWrite(12, LOW);
+        //Serial.print("Switch LED ON ");
+        tcpcmd = "";
+      } else if (tcpcmd.substring(40).equals(tcpcmd_led_off)) {
+        digitalWrite(12, HIGH);
+        //Serial.print("Switch LED OFF");
+        tcpcmd = "";
+      }
+    }
+  }
+
+  LDateTime.getRtc(&rtc);
+  if ((rtc - lrtc) >= per) {
+    heartBeat();
+    lrtc = rtc;
+  }
+  //Check for report datapoint status interval
+  LDateTime.getRtc(&rtc1);
+  if ((rtc1 - lrtc1) >= per1) {
+
+    uploadstatus();
+    GPS_receive();
+    uploadGPS();
+    lrtc1 = rtc1;
+  }
+  delay(500);
+}
